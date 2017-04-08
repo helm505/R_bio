@@ -1,0 +1,267 @@
+---
+title: "cw1"
+author: "rodion"
+date: '8 апреля 2017 г '
+output: html_document
+---
+
+
+
+```{r setup, message=FALSE}
+library(DESeq2)
+library(ggplot2)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(pheatmap)
+library(plotly)
+library(GSE)
+library(gridExtra)
+library(dplyr)
+library(VennDiagram)
+
+library(amap)
+library(dbscan)
+
+options(width=120)
+```
+
+## Файлы с которыми будем работать сегодня
+
+В ходе данной лекции нам понадобятся следующие файлы "GSE89225_illumina_counts.csv", "conditions.csv", "human_mart.txt". Для начала убедимся в том, что мы можем эти файлы прочитать. И посмотрим, что в них находится.
+
+```{r load}
+conditions <- read.csv("GSE89633_conditions.tsv", sep="\t", header=1, row.names = 1, quote="")
+counts <- read.csv("GSE89633_counts.tsv", sep="\t", header=1, row.names = 1, quote="")
+
+
+print(counts[1:6, 1:2])
+dim(counts)
+head(counts)
+head(conditions)
+dim(conditions)
+
+```
+
+
+
+# DESeq2
+DESeq2 -- это царь-библиотека необходимая для работы с данными RNA-seq. Тут и дифференциальная экспрессия, и нормализации, и PCA-plots.
+
+строим PCA 
+
+```{r deseаq_prep, cache=TRUE, message=FALSE}
+dds <- DESeqDataSetFromMatrix(countData = counts,
+                              colData = conditions,
+                              design = ~ cells + conditions)
+ind <- order(rowSums(counts(dds)), decreasing = TRUE)
+dds <- dds[ind, ][1:8000,]
+dds <- DESeq(dds)
+vst_dds <- vst(dds)
+counts.norm <- assay(vst_dds)
+
+
+
+plotPCA(vst_dds, intgroup=c("cells", "conditions")) + theme_bw()
+
+
+```
+
+Kmeans
+
+
+Используем rlog(dds) для получения логарифмированных значений экспрессии
+```{r logs2, message=FALSE, warning=FALSE}
+rlog_dds <- rlog(dds)
+counts.log2  <- assay(rlog_dds)
+```
+
+Используем функцию Kmeans из пакета amap с методом “correlation”, c количеством кластеров равным 6. (Вы можете выбрать своё количество кластеров), и максимальным количеством итераций равным 20000
+```{r clustkmean, message=FALSE, warning=FALSE}
+clustering <- Kmeans(counts.log2, 8, method="correlation", iter.max=20000)
+```
+
+После этого вы можете достать соотвествие каждого гена кластеру с помощью элемента листа с названием “cluster”
+```{r headclust, message=FALSE, warning=FALSE}
+head(clustering$cluster)
+```
+
+После этого от вас потребуется эту кластеризацию изобразить на хитмапе: гены должны быть отсортированы по кластерам, а столбцы сначала по клеткам, а затем по тканям.
+```{r heat, fig.height=10, fig.width=8, message=FALSE, warning=FALSE}
+
+
+to_visualise <- counts.log2[order(clustering$cluster), order(conditions$cells, conditions$conditions)]
+cluster <- as.factor(clustering$cluster)
+cluster <- as.data.frame(cluster)
+to_visualise <- t(apply(to_visualise, 1, function(r) {
+  (r - min(r)) / (max(r) - min(r))
+}))
+
+
+pheatmap(to_visualise, 
+         show_rownames = F, cluster_rows = F,
+         cluster_cols=F,
+         annotation_col = conditions,
+         annotation_row =  cluster)
+# dev.off()
+
+
+```
+
+
+
+Отвечаю на вопросы:
+1. Да, при помощи PCA можно найти аутлаер в датасете. Это будет какая-нибудь точка на графике, которая удалена от остальных. Чтобы определить конкретно, что это за наблюдение, можно воспользоваться функцией плотли (и навести указатель мыши на данный аутлаер). При помощи хитмапы, как мне кажется, найти аутлаер труднее, чем при помощи PCA. Но я сейчас запустил первую домашку, там выброс (treg_NBP_patient3) выделяется из всех.
+
+2. Я думаю, что можем. У нас есть на pca названия групп (справа на графике - cell type + condition). 
+
+Делаем 3 сравнения
+
+```{r}
+cond_FB = conditions[conditions$cells == "cell type: FB",]
+cond_FAP = conditions[conditions$cells == "cell type: FAP",]
+cond_SMP = conditions[conditions$cells == "cell type: SMP",]
+
+
+#убрать cells из дизайна - заметка 
+
+counts_FB = counts[,rownames(cond_FB)]
+counts_FAP = counts[,rownames(cond_FAP)]
+counts_SMP = counts[,rownames(cond_SMP)]
+
+
+dds_FB <- DESeqDataSetFromMatrix(countData = counts_FB,
+                              colData = cond_FB,
+                              design =  ~ conditions)
+ind <- order(rowSums(counts(dds_FB)), decreasing = TRUE)
+dds_FB <- dds_FB[ind, ]
+dds_FB <- DESeq(dds_FB)
+vst_dds_FB <- vst(dds_FB)
+counts.norm_FB <- assay(vst_dds_FB)
+
+
+
+
+
+dds_FAP <- DESeqDataSetFromMatrix(countData = counts_FAP,
+                              colData = cond_FAP,
+                              design = ~ conditions)
+ind_FAP <- order(rowSums(counts(dds_FAP)), decreasing = TRUE)
+dds_FAP <- dds_FAP[ind_FAP, ]
+dds_FAP <- DESeq(dds_FAP)
+vst_dds_FAP <- vst(dds_FAP)
+counts.norm_FAP <- assay(vst_dds_FAP)
+
+
+
+dds_SMP <- DESeqDataSetFromMatrix(countData = counts_SMP,
+                              colData = cond_SMP,
+                              design = ~ conditions)
+ind_SMP <- order(rowSums(counts(dds_SMP)), decreasing = TRUE)
+dds_SMP <- dds_SMP[ind, ]
+dds_SMP <- DESeq(dds_SMP)
+vst_dds_SMP <- vst(dds_SMP)
+counts.norm_SMP <- assay(vst_dds_SMP)
+
+
+```
+
+
+
+
+# Differential expression
+
+```{r diff_exp}
+res_FB <- results(dds_FB)
+res_FB
+mcols(res_FB)$description
+res_FB <- res_FB[order(res_FB[, 4]), ]
+res_FB
+
+
+# Готовим данные для Volcano plot 
+res_FAP <- results(dds_FAP)
+res_FAP
+mcols(res_FAP)$description
+res_FAP <- res_FAP[order(res_FAP[, 4]), ]
+res_FAP
+
+res_SMP <- results(dds_SMP)
+res_SMP
+mcols(res_SMP)$description
+res_SMP <- res_SMP[order(res_SMP[, 4]), ]
+res_SMP
+
+
+```
+
+Самый обычный способ визуализировать данные дифф.экспрессии -- это volcano plot. По оси x мы будем откладывать log fold change, а по y - adjusted p value.
+
+```{r volcano_plot}
+
+# Строим Volcano plot
+
+gdata1 <- data.frame(
+  x=res_FB$log2FoldChange,
+  y=-log10(res_FB$padj),
+  name_ =  "1"
+)
+
+gdata2 <- data.frame(
+  x=res_FAP$log2FoldChange,
+  y=-log10(res_FAP$padj),
+  name_ =  "2"
+)
+
+
+gdata3 <- data.frame(
+  x=res_SMP$log2FoldChange,
+  y=-log10(res_SMP$padj),
+  name_ =  "3"
+)
+
+
+gdata4 <- rbind(gdata1, gdata2, gdata3)
+res4 <- rbind(res_FB, res_FAP, res_SMP)
+
+gdata4 <- gdata4 %>%
+  mutate(color = ifelse(res4$padj > 0.01, 
+                        yes = "Significant", 
+                        no =  "Not Significant"))
+
+
+
+ggplot(data=gdata4, aes(x=x, y=y)) +
+  geom_point(aes(color = factor(color)), size=1) + theme_bw()  +
+  xlab("Log fold change") +
+  ylab("Adjusted p.value") +
+  geom_hline(yintercept=2, color='red') +
+  facet_grid(. ~ name_) +
+  scale_color_manual(values = c("Significant" = "#000000", 
+                                "Not Significant" = "#ff0000")) # change colors
+
+```
+
+
+```{r Vendiagrams}
+#Последнее задание, строим Ven diagrams
+
+resone <- res_FB[which(res_FB$padj < 0.01),]
+restwo <- res_FAP[which(res_FAP$padj < 0.01),]
+resthree <- res_SMP[which(res_SMP$padj < 0.01),]
+commongenes <- intersect(rownames(resone), rownames(restwo))
+commongenes2 <- intersect(rownames(resthree), rownames(restwo))
+
+commongenes22 <- intersect(rownames(resone), rownames(resthree))
+
+commongenes3 <- intersect(commongenes, commongenes22)
+
+commongenes4 <- intersect(commongenes3, commongenes2)
+draw.triple.venn(area1 = length(rownames(resone)), area2 = length(rownames(restwo)), 
+                 area3 = length(rownames(resthree)),
+                 n12 = length(commongenes), 
+                 n23 = length(commongenes2), 
+                 n13 = length(commongenes22),
+                 n123 = length(commongenes4)) 
+
+```
+
