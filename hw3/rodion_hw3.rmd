@@ -1,0 +1,163 @@
+---
+title: "Rodion_hw3"
+author: "Rodion"
+date: '30 апреля 2017 г '
+oc: 'Windows 10'
+output: 
+  html_document: 
+    fig_height: 7
+    fig_width: 15
+---
+
+---
+## Библиотеки, которые нам понадобятся
+```{r libs, warning=F, message=F}
+library(RSQLite)
+library(DBI)
+```
+
+
+```{r read_data}
+mydb <- dbConnect(RSQLite::SQLite(), "data.sqlite")
+dbListTables(mydb)
+```
+
+
+
+
+1. Перечислить пользователей в алфавитном порядке username (все колонки в любом порядке)
+
+```{r answer1}
+
+dbGetQuery(mydb, "select * from Users
+           order by username");
+
+```
+
+2. 5 пользователей, которые зарегистрировались последними (все колонки в любом порядке)
+```{r answer2}
+answer2 <- dbGetQuery(mydb, "select * from Users
+                      order by registered DESC
+                      ");
+head(answer2,5)
+```
+
+3. Топ 5 пользователей по числу прослушиваний (все колонки в любом порядке)
+```{r answer3}
+answer3 <- dbGetQuery(mydb, "select * from Users
+                      join Listened on Listened.user_id = Users.id
+                      group by username
+                      order by count(id) DESC
+                      ");
+head(answer3,5)
+
+```
+
+
+
+4. Информацию об исполнителях и количестве их альбомов (имя исполнителя|число)
+```{r answer4}
+
+
+dbGetQuery(mydb, "select Artists.name as Artist, count(Albums.artist_id) as Number_of_albums from Artists
+                      join Albums on Albums.artist_id = Artists.id
+                      group by Artists.name
+                      ");
+
+```
+
+5. Информацию об исполнителях и количестве их песен (имя исполнителя|число)
+```{r answer5}
+dbGetQuery(mydb, "select Artists.name as Artist, count(Songs.id) as Number_of_songs from Artists
+                      join Albums on Artists.id = Albums.artist_id 
+                      join Songs on Songs.album_id = Albums.id  
+                      group by Artists.name
+                      ");
+```
+
+
+
+6. Самый длинный альбом по числу песен. (имя исполнителя|название альбома|число)
+```{r answer6}
+answer6 <- dbGetQuery(mydb, "select Artists.name as Artist, Albums.name as Album, count(Songs.id) as Number_of_songs from Artists
+                      join Albums on Artists.id  = Albums.artist_id 
+                      join Songs on Albums.id = Songs.Album_id 
+                      group by Albums.name
+                      order by count(Songs.id) DESC
+                      ");
+head(answer6, 1)
+```
+
+
+7. Самый длинный альбом по суммарной продолжительности. (имя исполнителя|название альбома|число)
+```{r answer7}
+answer7 <- dbGetQuery(mydb, "select Artists.name as Artist, Albums.name as Album, total(Songs.duration) as Album_length from Artists
+                      join Albums on Artists.id  = Albums.artist_id 
+                      join Songs on Albums.id = Songs.Album_id 
+                      group by Albums.name
+                      order by total(Songs.duration) DESC
+                      ");
+head(answer7, 1)
+```
+
+8. Альбом самой большой средней продолжительностью трека. (имя исполнителя|название альбома|число)
+```{r answer8}
+answer8 <- dbGetQuery(mydb, "select Artists.name as Artist, Albums.name as Album, total(Songs.duration)/count(Songs.id) as Mean_song_duration from Artists
+                      join Albums on Artists.id  = Albums.artist_id 
+                      join Songs on Albums.id = Songs.Album_id 
+                      group by Albums.name
+                      order by total(Songs.duration)/count(Songs.id) DESC
+                      ");
+head(answer8, 1)
+```
+
+9. Топ 5 самых прослушиваемых треков. (имя исполнителя|название альбома|название песни|число)
+```{r answer9}
+answer9 <- dbGetQuery(mydb, "select Artists.name as Artist, Albums.name as Album, Songs.name as Song, count(Listened.song_id) as Scrobbled from Artists
+                      join Albums on Artists.id  = Albums.artist_id 
+                      join Songs on Albums.id = Songs.Album_id 
+                      join Listened on Listened.song_id = Songs.id
+                      group by Listened.song_id
+                      order by count(Listened.song_id) DESC
+                      ");
+head(answer9, 5)
+```
+
+10. Найдите год, что песни, выпущенные в этом году, слушают больше всего (год|количество прослушиваний)
+```{r answer10}
+answer10 <- dbGetQuery(mydb, "select Albums.release_year as year, count(Listened.song_id) as Scrobbled from Albums
+                      join Songs on Albums.id = Songs.Album_id 
+                      join Listened on Listened.song_id = Songs.id
+                      group by Albums.release_year
+                      order by count(Listened.song_id) DESC
+                      ");
+head(answer10, 1)
+
+```
+
+11. Для пользователя с id=47 найдите топ 20 последних прослушанных треков. (имя исполнителя|название альбома|название песни|когда)
+```{r answer11}
+answer11 <- dbGetQuery(mydb, "select Artists.name as Artist, Albums.name as Album, Songs.name as Song, Listened.start_time as When_it_was_scrobbled from Artists
+                      join Albums on Artists.id  = Albums.artist_id 
+                      join Songs on Albums.id = Songs.Album_id 
+                      join Listened on Listened.song_id = Songs.id
+                      join Users on Users.id = Listened.user_id
+                      where Users.id = 47
+                      order by Listened.start_time DESC
+                      ");
+head(answer11, 20)
+```
+
+12. (Больше join Богу join) Для каждого пользователя и каждой песни, которую пользователь прослушал, найдите количество прослушиваний. (имя пользователя|имя исполнителя|название альбома|название песни|число). Подсказка – можно использовать пару колонок в group by.
+```{r answer12}
+answer12 <- dbGetQuery(mydb, "select Users.username as User, Artists.name as Artist, Albums.name as Album, Songs.name as Song, count(Listened.song_id) as Scrobbled from Artists
+                      join Users on Users.id  = Listened.user_id
+                      join Albums on Artists.id  = Albums.artist_id 
+                      join Songs on Albums.id = Songs.Album_id 
+                      join Listened on Listened.song_id = Songs.id
+                      group by Users.username, Songs.name
+                       ");
+head(answer12)
+#На этом этапе процес Knit в html застывает на 97% и комп начинается усиленно работать...Поэтому я сделал head(answer12)
+```
+
